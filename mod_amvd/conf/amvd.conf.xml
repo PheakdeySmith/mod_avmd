@@ -29,21 +29,24 @@
 
       <!-- Human fast path: short greeting, then the callee waits for us.
            Required silence = base + slope * greeting_ms, capped at max:
-           "hello?" (500 ms) -> 850 ms;  1.5 s greeting -> 1350 ms. -->
+           "hello?" (500 ms) -> 950 ms;  1.5 s greeting -> 1650 ms.
+           Tuned 2026-11 on a held-out synthetic corpus: slope 0.5 -> 0.7 and cap 1500 -> 1700
+           cut machines-called-human from 4.3% to 1.2% (voicemails with a pause after
+           the first phrase) for ~+100 ms median dead air on humans. -->
       <param name="human-max-greeting-ms" value="1800"/>
       <param name="human-silence-base-ms" value="600"/>
-      <param name="human-silence-slope" value="0.5"/>
-      <param name="human-silence-max-ms" value="1500"/>
+      <param name="human-silence-slope" value="0.7"/>
+      <param name="human-silence-max-ms" value="1700"/>
       <param name="business-silence-ms" value="1500"/>  <!-- 1.8-2.8 s greeting then this much silence -->
 
       <!-- Machine paths -->
       <param name="machine-speech-ms" value="2800"/>    <!-- cumulative greeting speech -->
-      <param name="machine-max-words" value="6"/>
+      <param name="machine-max-words" value="7"/>   <!-- 6 caught long business greetings -->
 
       <!-- Timeouts -->
       <param name="initial-silence-ms" value="3500"/>
       <param name="window-ms" value="3000"/>            <!-- model checkpoint; must match training -->
-      <param name="total-analysis-ms" value="5000"/>
+      <param name="total-analysis-ms" value="6000"/>   <!-- 5000 let noisy voicemails time out as human -->
       <param name="default-verdict" value="human"/>     <!-- human | machine | unknown -->
 
       <!-- Tones -->
@@ -76,8 +79,8 @@
          parallel and released on "human". Slightly quicker human path. -->
     <profile name="ai-agent" extends="default">
       <param name="human-silence-base-ms" value="500"/>
-      <param name="human-silence-slope" value="0.45"/>
-      <param name="human-silence-max-ms" value="1300"/>
+      <param name="human-silence-slope" value="0.7"/>    <!-- was 0.45/1300: 8.6% of machines called human -->
+      <param name="human-silence-max-ms" value="1600"/>
     </profile>
 
     <!-- Leave a voicemail: after "machine" keep listening, fire amvd::message_end at the beep

@@ -1,0 +1,16 @@
+<configuration name="sofia.conf">
+  <global_settings><param name="log-level" value="0"/></global_settings>
+  <profiles>
+    <!-- caller side: originate from here; mod_amvd listens to the callee audio on this leg -->
+    <profile name="uac"><settings>
+      <param name="sip-ip" value="127.0.0.1"/>
+      <param name="rtp-ip" value="127.0.0.1"/>
+      <param name="sip-port" value="15060"/>
+      <param name="context" value="uac"/>
+      <param name="dialplan" value="XML"/>
+      <param name="inbound-codec-prefs" value="PCMU"/>
+      <param name="outbound-codec-prefs" value="PCMU"/>
+      <param name="auth-calls" value="false"/>
+    </settings></profile>
+  </profiles>
+</configuration>

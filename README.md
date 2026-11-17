@@ -15,10 +15,10 @@ callee audio (media bug, read-only, from answer)
   ├─ adaptive VAD (minimum-statistics noise floor) → words → utterances
   ├─ tone detector (ZCR-guided Goertzel, 1 % grid) → beep · fax CED 2100 Hz · SIT triplet
   │
-  ├─ fast rules ── short greeting + graded silence ──────────► human   (~0.85 s after "hello?")
+  ├─ fast rules ── short greeting + graded silence ──────────► human   (~0.95 s after "hello?")
   │             └─ long cumulative speech / many words / beep ► machine
   ├─ window checkpoint (3 s) ── optional trained tree model ──► human / machine
-  ├─ hard stop (5 s) ─────────────────────────────────────────► default (human)
+  ├─ hard stop (6 s) ─────────────────────────────────────────► default (human)
   │
   └─ message-end tracker (machine only, optional) ─► beep | silence | other
                      │
@@ -195,7 +195,7 @@ alone. Only the transcript separates them, which is why that path exists.
 | Symptom (from `evaluate.py` / `amvdctl` log) | Change |
 |---|---|
 | Humans with longer hellos called machine | raise `machine-speech-ms`, `human-max-greeting-ms`; use `conservative` |
-| Short voicemails with a mid-greeting pause called human | raise `human-silence-slope` / `human-silence-max-ms` (costs dead air), or train a model with `human-defer-to-model=true` |
+| Short voicemails with a mid-greeting pause called human | raise `human-silence-slope` / `human-silence-max-ms` (costs dead air; already raised to 0.7 / 1700, see below), or train a model with `human-defer-to-model=true` |
 | Dead air too long for humans | lower `human-silence-base-ms` (≥ 450) |
 | Quiet / noisy lines | `vad-margin-db` 7–12, `vad-floor-dbfs` −50…−40 |
 | VM drop starts mid-greeting on no-beep mailboxes | raise `end-silence-ms` (2000–2500) |
@@ -204,6 +204,23 @@ alone. Only the transcript separates them, which is why that path exists.
 
 Change one variable at a time and compare on the **same** corpus. Only call a change better when
 the Wilson intervals don't overlap.
+
+### Defaults tuned 2026-11 (synthetic corpus)
+
+Swept on a 1,400-call training corpus (`gen_corpus.py --seed 101 -n 100`), then checked once on a
+separate 840-call held-out corpus (`--seed 202 -n 60`) that tuning never saw:
+
+| Param | Old | New | Why |
+|---|---|---|---|
+| `human-silence-slope` / `-max-ms` (default) | 0.5 / 1500 | 0.7 / 1700 | voicemails that pause after the first phrase were called human |
+| `human-silence-slope` / `-max-ms` (`ai-agent`) | 0.45 / 1300 | 0.7 / 1600 | same; this profile had 8 % of machines called human |
+| `total-analysis-ms` | 5000 | 6000 | noisy voicemails timed out to the default verdict (human) |
+| `machine-max-words` | 6 | 7 | long business greetings ("thanks for calling …") hit the word rule |
+
+Held-out results, `ai-agent` profile: machines called human 34/420 → 7/420 (offline) and 3/420
+through FreeSWITCH; humans called machine 2/300 → 1/300; median dead air on humans
+737 → 860 ms. The trained window model added nothing over these rules on held-out data, so
+`model-file` stays empty. These values come from synthetic audio: re-tune on your recordings.
 
 ## Performance at high volume (5,000 concurrent calls)
 
@@ -286,12 +303,12 @@ production before switching.
 
 ## Verified here
 
-- **Synthetic corpus, 840 calls, 14 strata** (µ-law 8 kHz, source-filter speech, 10 dB-SNR
-  variants, music greetings, fax, SIT): no human misread as machine (0/300, 95 % CI upper
-  bound 1.26 %); false human 1.9 % (8/420, almost all mid-greeting-pause voicemails, the known
-  timing-only blind spot); dead air on humans P50 851 ms / P95 1508 ms; VM drop fires a median
-  147 ms after the beep ends, with no beep-based drop early; 1 of 412 drops clipped (a noisy
-  no-beep mailbox, where silence-based end detection is weakest).
+- **Synthetic held-out corpus, 840 calls, 14 strata** (µ-law 8 kHz, source-filter speech,
+  10 dB-SNR variants, music greetings, fax, SIT; `--seed 202`, not used for tuning), default
+  profile: humans called machine 1/300 (0.33 %, 95 % CI upper bound 1.86 %; a long business
+  greeting); machines called human 5/420 (1.2 %, mostly 10 dB-SNR voicemails); dead air on
+  humans P50 960 ms / P95 1507 ms; VM drop fires a median 148 ms after the beep ends, with
+  0 of 415 drops clipped.
 - **CPU**: see the performance section. 5,000 simultaneous detections need 1.6–2.9 cores depending on codec rate.
 - **Robustness**: same verdicts at 8/16/48 kHz (120/120 clips) and identical results across 1–4096-sample chunks;
   ASan + UBSan clean; model export matches sklearn exactly (float32 split semantics reproduced in C).
@@ -300,6 +317,17 @@ production before switching.
 - **Controller**: `go vet` clean; tested against a mock event socket (routing, VM drop on
   message_end, transcript override, JSONL output).
 
-**Not verified here:** loading into a live FreeSWITCH and real PSTN calls. Synthetic accuracy is
+- **Real FreeSWITCH (1.10.12), real SIP/RTP**: `test/fs_e2e/run.sh` starts an isolated
+  FreeSWITCH (SIP 15060, ESL 28021, all on 127.0.0.1), loads `mod_amvd.so`, and places calls to
+  `sip_callee.py`, which answers and streams each corpus file as PCMU RTP. On the 840-call held-out
+  corpus with the `ai-agent` profile: 836/840 correct, 1/300 humans called machine, 3/420
+  machines called human, all 60 fax and 60 SIT correct, 30 concurrent calls, no crashes.
+
+  ```
+  python3 test/gen_corpus.py build/heldout -n 60 --seed 202
+  test/fs_e2e/run.sh build/heldout 60 ai-agent
+  ```
+
+**Not verified here:** real PSTN calls and long soak tests at production volume. Synthetic accuracy is
 an upper bound: the research cited above saw 99.3 % on curated data drop to about 88 % in
 production. Treat the numbers as "the logic works", then measure on your traffic with the loop above.

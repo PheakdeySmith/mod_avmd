@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!-- Minimal, isolated FreeSWITCH for mod_amvd end-to-end tests. Ports: SIP 15060, ESL 28021,
+     RTP 40000-40500, all on 127.0.0.1, so it can run next to a production instance.
+     Copy ../../mod_amvd/conf/amvd.conf.xml into autoload_configs/ before starting (run.sh does). -->
+<document type="freeswitch/xml">
+<section name="configuration" description="cfg">
+<X-PRE-PROCESS cmd="include" data="autoload_configs/*.xml"/>
+</section>
+<section name="dialplan" description="dp">
+<context name="uac"><extension name="park"><condition field="destination_number" expression="^.*$"><action application="park"/></condition></extension></context>
+</section>
+</document>

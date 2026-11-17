@@ -62,13 +62,13 @@ void amvd_config_defaults(amvd_config_t *c)
 	c->initial_silence_ms = 3500;
 	c->human_max_greeting_ms = 1800;
 	c->human_silence_base_ms = 600;
-	c->human_silence_slope = 0.5;
-	c->human_silence_max_ms = 1500;
+	c->human_silence_slope = 0.7;
+	c->human_silence_max_ms = 1700;
 	c->business_silence_ms = 1500;
 	c->machine_speech_ms = 2800;
-	c->machine_max_words = 6;
+	c->machine_max_words = 7;
 	c->window_ms = 3000;
-	c->total_analysis_ms = 5000;
+	c->total_analysis_ms = 6000;
 	c->default_verdict = AMVD_DEFAULT_HUMAN;
 	c->machine_threshold = 0.85;
 	c->human_threshold = 0.35;

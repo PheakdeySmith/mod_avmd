@@ -180,8 +180,10 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('outdir')
     ap.add_argument('-n', type=int, default=40, help='samples per stratum')
+    ap.add_argument('--seed', type=int, default=7, help='RNG seed (use different seeds for train and held-out corpora)')
     args = ap.parse_args()
     N = args.n
+    rng = np.random.default_rng(args.seed)
     os.makedirs(args.outdir, exist_ok=True)
     rows = []
     for i, (stratum, truth, x, gend, bend) in enumerate(scenarios()):

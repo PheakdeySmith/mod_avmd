@@ -1,0 +1,6 @@
+<configuration name="switch.conf"><settings>
+  <param name="rtp-start-port" value="40000"/>
+  <param name="rtp-end-port" value="40500"/>
+  <param name="max-sessions" value="200"/>
+  <param name="sessions-per-second" value="50"/>
+</settings></configuration>
