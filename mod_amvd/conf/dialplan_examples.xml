@@ -1,0 +1,93 @@
+<!--
+  mod_amvd dialplan examples. Copy the parts you need into your dialplan.
+
+  START DETECTION AT ANSWER. Starting later loses the first syllables of the greeting,
+  which is where most of the signal is. For originate-based campaigns put it in the
+  originate string so it attaches the instant the callee answers:
+
+    originate {execute_on_answer='amvd_start ai-agent',amvd_campaign=42}sofia/gateway/trunk/855XXXXXXXX &park()
+
+  Background mode never holds the callee in silence (sync AMD that waits ~4 s causes hang-ups);
+  your controller reacts to CUSTOM amvd::result / amvd::message_end over ESL.
+-->
+<include>
+
+  <!-- 1. Blocking: classic dialer flow. Dialplan continues with ${amvd_result}. -->
+  <extension name="amvd_blocking">
+    <condition field="destination_number" expression="^amvd_blocking$">
+      <action application="answer"/>
+      <action application="amvd" data="default"/>
+      <action application="log" data="INFO AMVD ${amvd_result}/${amvd_reason} in ${amvd_decision_ms}ms"/>
+      <action application="execute_extension" data="amvd_${amvd_result} XML ${context}"/>
+    </condition>
+  </extension>
+
+  <extension name="amvd_human">
+    <condition field="destination_number" expression="^amvd_human$">
+      <!-- e.g. bridge to an agent queue, or to the LiveKit SIP trunk -->
+      <action application="bridge" data="sofia/internal/agent-queue@127.0.0.1"/>
+    </condition>
+  </extension>
+  <extension name="amvd_machine">
+    <condition field="destination_number" expression="^amvd_machine$">
+      <action application="hangup" data="NORMAL_CLEARING"/>
+    </condition>
+  </extension>
+  <extension name="amvd_unknown">
+    <condition field="destination_number" expression="^amvd_(unknown|error)$">
+      <!-- treat as human: a lost human costs more than a wasted agent second -->
+      <action application="transfer" data="amvd_human XML ${context}"/>
+    </condition>
+  </extension>
+  <extension name="amvd_fax_sit">
+    <condition field="destination_number" expression="^amvd_(fax|unavailable)$">
+      <action application="hangup" data="${cond(${amvd_result} == fax ? INCOMPATIBLE_DESTINATION : UNALLOCATED_NUMBER)}"/>
+    </condition>
+  </extension>
+
+  <!-- 2. Voicemail drop, blocking: returns at the beep / end of greeting, then plays. -->
+  <extension name="amvd_vmdrop">
+    <condition field="destination_number" expression="^amvd_vmdrop$">
+      <action application="answer"/>
+      <action application="amvd" data="voicemail-drop"/>
+      <action application="execute_extension" data="amvd_vm_${amvd_result} XML ${context}"/>
+    </condition>
+  </extension>
+  <extension name="amvd_vm_machine">
+    <condition field="destination_number" expression="^amvd_vm_machine$">
+      <!-- ${amvd_end_type}: beep | silence | other.  Lead with business name and callback number. -->
+      <action application="playback" data="/var/lib/freeswitch/vm_drops/campaign_${amvd_campaign}.wav"/>
+      <action application="hangup"/>
+    </condition>
+  </extension>
+
+  <!-- 3. Background with hooks (no external controller). The hook runs on a pool thread,
+          so it may transfer / record / start other media bugs safely.
+          Escape \${...} so it expands when the hook runs, not when it is set. -->
+  <extension name="amvd_background_hooks">
+    <condition field="destination_number" expression="^amvd_bg$">
+      <action application="answer"/>
+      <action application="set" data="api_on_amvd_result=uuid_transfer ${uuid} amvd_\${amvd_result} XML ${context}"/>
+      <action application="amvd_start" data="ai-agent"/>
+      <action application="park"/>
+    </condition>
+  </extension>
+
+  <!-- 4. Background + voicemail drop via hooks -->
+  <extension name="amvd_background_vmdrop">
+    <condition field="destination_number" expression="^amvd_bg_vm$">
+      <action application="answer"/>
+      <action application="set" data="api_on_amvd_result=uuid_transfer ${uuid} amvd_bg_\${amvd_result} XML ${context}"/>
+      <action application="set" data="api_on_amvd_message_end=uuid_transfer ${uuid} amvd_vm_machine XML ${context}"/>
+      <action application="amvd_start" data="voicemail-drop"/>
+      <action application="park"/>
+    </condition>
+  </extension>
+  <extension name="amvd_bg_machine">
+    <!-- machine: stay parked; the message_end hook transfers to amvd_vm_machine, which plays and hangs up -->
+    <condition field="destination_number" expression="^amvd_bg_machine$">
+      <action application="park"/>
+    </condition>
+  </extension>
+
+</include>

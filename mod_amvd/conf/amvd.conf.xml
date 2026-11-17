@@ -1,0 +1,110 @@
+<configuration name="amvd.conf" description="Answering Machine / Voicemail Detection">
+  <settings>
+    <!-- profile used when the app/API is called without one and ${amvd_profile} is unset -->
+    <param name="default-profile" value="default"/>
+    <!-- High volume (thousands of concurrent calls): slim event headers instead of all channel
+         variables, and no per-beep event. Results, message_end and hooks are unaffected. -->
+    <param name="event-channel-data" value="false"/>
+    <param name="fire-beep-events" value="false"/>
+  </settings>
+
+  <!--
+    Every param below can also be overridden per call:
+      - channel variable  amvd_params=machine-speech-ms=2500,window-ms=3000
+      - app/API arguments  amvd_start ai-agent initial-silence-ms=4000
+    Order: profile < ${amvd_params} < arguments.
+    Names accept '-' or '_'.
+  -->
+  <profiles>
+
+    <!-- Balanced default. Biased against the expensive error (calling a human a machine):
+         when evidence runs out the verdict is "human". -->
+    <profile name="default">
+      <!-- VAD -->
+      <param name="vad-floor-dbfs" value="-45"/>        <!-- absolute speech floor -->
+      <param name="vad-margin-db" value="9"/>           <!-- speech must beat the noise floor by this -->
+      <param name="min-word-ms" value="100"/>
+      <param name="word-gap-ms" value="80"/>
+      <param name="segment-gap-ms" value="300"/>
+
+      <!-- Human fast path: short greeting, then the callee waits for us.
+           Required silence = base + slope * greeting_ms, capped at max:
+           "hello?" (500 ms) -> 850 ms;  1.5 s greeting -> 1350 ms. -->
+      <param name="human-max-greeting-ms" value="1800"/>
+      <param name="human-silence-base-ms" value="600"/>
+      <param name="human-silence-slope" value="0.5"/>
+      <param name="human-silence-max-ms" value="1500"/>
+      <param name="business-silence-ms" value="1500"/>  <!-- 1.8-2.8 s greeting then this much silence -->
+
+      <!-- Machine paths -->
+      <param name="machine-speech-ms" value="2800"/>    <!-- cumulative greeting speech -->
+      <param name="machine-max-words" value="6"/>
+
+      <!-- Timeouts -->
+      <param name="initial-silence-ms" value="3500"/>
+      <param name="window-ms" value="3000"/>            <!-- model checkpoint; must match training -->
+      <param name="total-analysis-ms" value="5000"/>
+      <param name="default-verdict" value="human"/>     <!-- human | machine | unknown -->
+
+      <!-- Tones -->
+      <param name="tones-enabled" value="true"/>
+      <param name="tone-purity" value="0.80"/>
+      <param name="beep-min-hz" value="400"/>
+      <param name="beep-max-hz" value="2000"/>
+      <param name="beep-min-ms" value="70"/>
+      <param name="beep-max-ms" value="2000"/>
+      <param name="beep-freq-spread" value="0.015"/>
+      <param name="beep-pre-quiet-ms" value="100"/>
+      <param name="beep-is-machine" value="true"/>
+      <param name="fax-enabled" value="true"/>
+      <param name="sit-enabled" value="true"/>
+
+      <!-- Trained model (tools/train_model.py). Empty = rules only. -->
+      <param name="model-file" value=""/>
+      <param name="machine-threshold" value="0.85"/>
+      <param name="human-threshold" value="0.35"/>
+      <param name="human-defer-to-model" value="false"/>
+
+      <!-- Message end -->
+      <param name="wait-message-end" value="false"/>
+      <param name="end-silence-ms" value="1800"/>
+      <param name="beep-post-ms" value="150"/>
+      <param name="message-timeout-ms" value="45000"/>
+    </profile>
+
+    <!-- AI voice agent (LiveKit): run in background from answer, agent reply generated in
+         parallel and released on "human". Slightly quicker human path. -->
+    <profile name="ai-agent" extends="default">
+      <param name="human-silence-base-ms" value="500"/>
+      <param name="human-silence-slope" value="0.45"/>
+      <param name="human-silence-max-ms" value="1300"/>
+    </profile>
+
+    <!-- Leave a voicemail: after "machine" keep listening, fire amvd::message_end at the beep
+         (or at end-of-greeting silence when there is no beep), then play the message. -->
+    <profile name="voicemail-drop" extends="default">
+      <param name="wait-message-end" value="true"/>
+      <param name="end-silence-ms" value="1800"/>
+      <param name="message-timeout-ms" value="45000"/>
+    </profile>
+
+    <!-- Callbacks / appointment reminders: a false machine is very costly. -->
+    <profile name="conservative" extends="default">
+      <param name="machine-speech-ms" value="3500"/>
+      <param name="machine-max-words" value="8"/>
+      <param name="human-max-greeting-ms" value="2200"/>
+      <param name="total-analysis-ms" value="6000"/>
+      <param name="machine-threshold" value="0.94"/>
+    </profile>
+
+    <!-- Cold outbound with live agents: faster machine calls, accepts more false machines. -->
+    <profile name="aggressive" extends="default">
+      <param name="machine-speech-ms" value="2200"/>
+      <param name="machine-max-words" value="4"/>
+      <param name="human-max-greeting-ms" value="1500"/>
+      <param name="total-analysis-ms" value="4000"/>
+      <param name="machine-threshold" value="0.70"/>
+    </profile>
+
+  </profiles>
+</configuration>

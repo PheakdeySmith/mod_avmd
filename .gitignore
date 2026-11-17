@@ -1,0 +1,22 @@
+# build output
+build/
+*.o
+*.so
+*.a
+amvdctl
+amvd_cli
+
+# python
+__pycache__/
+*.pyc
+
+# editor / OS
+*.swp
+.vscode/
+.idea/
+.DS_Store
+
+# local data and models
+*.wav
+corpus/
+*.model
