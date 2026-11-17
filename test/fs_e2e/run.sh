@@ -45,4 +45,4 @@ CALLEE=$!
 for _ in $(seq 1 30); do sleep 2; $FS_CLI -x 'amvd status' >/dev/null 2>&1 && break; done
 $FS_CLI -x 'amvd status' | head -1
 
-python3 "$HERE/run_calls.py" --corpus "$CORPUS" -n "$N" --profile "$PROFILE"
+python3 "$HERE/run_calls.py" --corpus "$CORPUS" -n "$N" --profile "$PROFILE" ${AMVD_OUT:+--out "$AMVD_OUT"}

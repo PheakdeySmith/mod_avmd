@@ -55,6 +55,7 @@ def main():
     ap.add_argument("--esl", default="127.0.0.1:28021")
     ap.add_argument("--password", default="ClueCon")
     ap.add_argument("--timeout", type=int, default=900)
+    ap.add_argument("--out", help="write one row per call (file, truth, verdict, reason, timings) to this CSV")
     args = ap.parse_args()
 
     labels = list(csv.DictReader(open(args.corpus + "/labels.csv")))
@@ -122,6 +123,14 @@ def main():
         ms = sorted(m for _, m in v)
         print("  %-20s %3d/%3d  P50=%4d P95=%4d" % (st, sum(ok for ok, _ in v), len(v),
                                                     ms[len(ms) // 2], ms[max(0, int(len(ms) * .95) - 1)]))
+    if args.out:
+        cols = ["AMVD-Result", "AMVD-Reason", "AMVD-Decision-MS", "AMVD-First-Speech-MS", "AMVD-P-Machine"]
+        with open(args.out, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["file", "truth", "result", "reason", "decision_ms", "first_speech_ms", "p_machine"])
+            for fn, (r, ev) in sorted(out.items()):
+                w.writerow([fn, r.get("truth", "")] + [ev.get(c, "") for c in cols])
+        print("\nwrote", args.out)
     missing = total - len(out)
     if missing:
         print("\n%d calls produced no verdict (check the FreeSWITCH log)" % missing)
