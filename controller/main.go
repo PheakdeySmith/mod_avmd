@@ -76,7 +76,9 @@ func dialESL(addr, pass string) (*esl, error) {
 		c.Close()
 		return nil, fmt.Errorf("auth failed: %s %v", h.Get("Reply-Text"), err)
 	}
-	e.send("event plain CUSTOM amvd::result amvd::message_end CHANNEL_HANGUP_COMPLETE")
+	// CUSTOM must come last: FreeSWITCH reads every word after it as a subclass, so a
+	// CHANNEL_HANGUP_COMPLETE placed after it is never subscribed.
+	e.send("event plain CHANNEL_HANGUP_COMPLETE CUSTOM amvd::result amvd::message_end")
 	// Filters are OR-ed: amvd events, plus hangups of channels mod_amvd marked. Without this
 	// every hangup on a 5000-CC node would cross the socket.
 	e.send("filter Event-Subclass amvd::result")
@@ -143,6 +145,11 @@ type callRec struct {
 	EndType       string            `json:"end_type,omitempty"`
 	EndMS         int               `json:"end_ms,omitempty"`
 	BeepHz        string            `json:"beep_hz,omitempty"`
+	Gateway       string            `json:"gateway,omitempty"`
+	RingMS        int               `json:"ring_ms"`                  // channel created -> answered; very short = suspect FAS
+	EarlyMedia    bool              `json:"early_media"`              // 183/early media before answer
+	NoAudioMS     int               `json:"no_audio_ms"`              // audio that was missing RTP
+	AgentDelayMS  *int              `json:"agent_delay_ms,omitempty"` // result -> agent's first audio (POST /v1/agent-audio)
 	Transcript    *transcriptVerdct `json:"transcript,omitempty"`
 	Final         string            `json:"final"` // what we acted on
 	Actions       []string          `json:"actions"`
@@ -152,8 +159,9 @@ type callRec struct {
 	Truth         string            `json:"truth"` // left empty: fill by QA / disposition for training
 	Node          string            `json:"node"`
 
-	node *esl
-	seen time.Time
+	node     *esl
+	seen     time.Time
+	resultAt time.Time
 }
 
 type transcriptVerdct struct {
@@ -212,9 +220,12 @@ func (k *controller) onResult(node *esl, addr string, ev map[string]string) {
 	c.Result, c.Reason = ev["AMVD-Result"], ev["AMVD-Reason"]
 	c.DecisionMS, c.PMachine = atoi(ev["AMVD-Decision-MS"]), atof(ev["AMVD-P-Machine"])
 	c.FirstSpeechMS, c.Features = atoi(ev["AMVD-First-Speech-MS"]), ev["AMVD-Features"]
+	c.Gateway, c.RingMS = ev["AMVD-Gateway"], atoi(ev["AMVD-Ring-MS"])
+	c.EarlyMedia, c.NoAudioMS = ev["AMVD-Early-Media"] == "true", atoi(ev["AMVD-No-Audio-MS"])
+	c.resultAt = time.Now()
 	c.Final = c.Result
 	if *verbose {
-		log.Printf("%s result=%s reason=%s %dms policy=%s", uuid, c.Result, c.Reason, c.DecisionMS, c.Policy)
+		log.Printf("%s result=%s reason=%s %dms policy=%s gw=%s ring=%dms", uuid, c.Result, c.Reason, c.DecisionMS, c.Policy, c.Gateway, c.RingMS)
 	}
 
 	if c.Policy == "detect" {
@@ -270,6 +281,22 @@ func (k *controller) onTranscript(uuid string, v transcriptVerdct) error {
 		case "screener", "machine-ivr":
 			c.Final = v.Category // agent should answer the screener / navigate the IVR
 		}
+	}
+	return nil
+}
+
+// The voice agent reports when it starts speaking; the gap since the verdict is dead air the
+// callee hears (long gaps are what make people repeat "hello? hello?"). First report wins.
+func (k *controller) onAgentAudio(uuid string) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	c := k.calls[uuid]
+	if c == nil {
+		return fmt.Errorf("unknown call")
+	}
+	if c.AgentDelayMS == nil && !c.resultAt.IsZero() {
+		ms := int(time.Since(c.resultAt).Milliseconds())
+		c.AgentDelayMS = &ms
 	}
 	return nil
 }
@@ -348,6 +375,25 @@ func (k *controller) serveHTTP() {
 			return
 		}
 		if err := k.onTranscript(body.UUID, body.transcriptVerdct); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	// POST /v1/agent-audio {"uuid":"..."} when the agent plays its first audio on the call
+	mux.HandleFunc("/v1/agent-audio", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			UUID string `json:"uuid"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil || body.UUID == "" {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if err := k.onAgentAudio(body.UUID); err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}

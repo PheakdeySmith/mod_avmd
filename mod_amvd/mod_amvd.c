@@ -16,7 +16,7 @@
  * Channel variables read : amvd_profile, amvd_params ("k=v,k=v", applied after the profile)
  * Channel variables set  : amvd_result, amvd_reason, amvd_decision_ms, amvd_p_machine,
  *                          amvd_first_speech_ms, amvd_features, amvd_end_type, amvd_end_ms,
- *                          amvd_beep_hz, amvd_no_audio_ms
+ *                          amvd_beep_hz, amvd_no_audio_ms, amvd_ring_ms, amvd_early_media
  *                          AMDSTATUS / AMDCAUSE (VICIdial / mod_amd compatible)
  * Hooks (background)     : api_on_amvd_result*, api_on_amvd_message_end* run as API commands
  *                          on a pool thread, never under the media bug lock
@@ -317,15 +317,35 @@ static void run_api_on(amvd_call_t *call, const char *prefix)
 	}
 }
 
+/* Answer-side facts for spotting false answer supervision: a carrier that "answers" a few
+ * hundred ms after the INVITE, or without any ringing / early media first, is suspect.
+ * ring_ms = channel created -> answered; -1 when unknown. */
+typedef struct { int ring_ms; int early_media; const char *gateway; } answer_info_t;
+
+static answer_info_t answer_info(switch_channel_t *channel)
+{
+	answer_info_t a = { -1, 0, NULL };
+	switch_caller_profile_t *cp = switch_channel_get_caller_profile(channel);
+	if (cp && cp->times) {
+		if (cp->times->answered && cp->times->created && cp->times->answered >= cp->times->created)
+			a.ring_ms = (int)((cp->times->answered - cp->times->created) / 1000);
+		a.early_media = cp->times->progress_media ? 1 : 0;
+	}
+	a.gateway = switch_channel_get_variable(channel, "sip_gateway_name");
+	return a;
+}
+
 static void apply_result(amvd_call_t *call, const char *override_result)
 {
 	const amvd_report_t *r = amvd_engine_report(call->engine);
 	const char *res = override_result ? override_result : amvd_result_str(r->result);
 	char feats[1024];
 	switch_event_t *ev;
+	answer_info_t ai;
 
 	if (call->result_applied) return;
 	call->result_applied = 1;
+	ai = answer_info(call->channel);
 
 	amvd_features_csv(r->features, feats, sizeof(feats));
 	switch_channel_set_variable(call->channel, "amvd_result", res);
@@ -335,6 +355,8 @@ static void apply_result(amvd_call_t *call, const char *override_result)
 	switch_channel_set_variable_printf(call->channel, "amvd_first_speech_ms", "%d", r->first_speech_ms);
 	switch_channel_set_variable(call->channel, "amvd_features", feats);
 	switch_channel_set_variable_printf(call->channel, "amvd_no_audio_ms", "%u", call->no_audio_ms);
+	switch_channel_set_variable_printf(call->channel, "amvd_ring_ms", "%d", ai.ring_ms);
+	switch_channel_set_variable(call->channel, "amvd_early_media", ai.early_media ? "true" : "false");
 	if (override_result && !strcmp(override_result, "hangup")) {
 		switch_channel_set_variable(call->channel, "AMDSTATUS", "HANGUP");
 		switch_channel_set_variable(call->channel, "AMDCAUSE", "HANGUP");
@@ -367,6 +389,9 @@ static void apply_result(amvd_call_t *call, const char *override_result)
 		switch_event_add_header(ev, SWITCH_STACK_BOTTOM, "AMVD-P-Machine", "%.4f", r->p_machine);
 		switch_event_add_header(ev, SWITCH_STACK_BOTTOM, "AMVD-First-Speech-MS", "%d", r->first_speech_ms);
 		switch_event_add_header_string(ev, SWITCH_STACK_BOTTOM, "AMVD-Wait-Message-End", call->wait_end ? "true" : "false");
+		switch_event_add_header(ev, SWITCH_STACK_BOTTOM, "AMVD-Ring-MS", "%d", ai.ring_ms);
+		switch_event_add_header_string(ev, SWITCH_STACK_BOTTOM, "AMVD-Early-Media", ai.early_media ? "true" : "false");
+		switch_event_add_header_string(ev, SWITCH_STACK_BOTTOM, "AMVD-Gateway", switch_str_nil(ai.gateway));
 		switch_event_add_header_string(ev, SWITCH_STACK_BOTTOM, "AMD-Status", switch_channel_get_variable(call->channel, "AMDSTATUS"));
 		switch_event_add_header_string(ev, SWITCH_STACK_BOTTOM, "AMD-Cause", switch_channel_get_variable(call->channel, "AMDCAUSE"));
 		switch_event_fire(&ev);

@@ -18,7 +18,7 @@
   <profiles>
 
     <!-- Balanced default. Biased against the expensive error (calling a human a machine):
-         when evidence runs out the verdict is "human". -->
+         when evidence runs out the verdict is "unknown", never "machine". -->
     <profile name="default">
       <!-- VAD -->
       <param name="vad-floor-dbfs" value="-45"/>        <!-- absolute speech floor -->
@@ -47,7 +47,10 @@
       <param name="initial-silence-ms" value="3500"/>
       <param name="window-ms" value="3000"/>            <!-- model checkpoint; must match training -->
       <param name="total-analysis-ms" value="6000"/>   <!-- 5000 let noisy voicemails time out as human -->
-      <param name="default-verdict" value="human"/>     <!-- human | machine | unknown -->
+      <!-- "unknown" when nobody spoke (initial_silence / no_speech / timeout): silence can be a
+           quiet human, dead air or false answer supervision, so don't label it human.
+           amvdctl still routes unknown like human; check amvd_ring_ms / amvd_no_audio_ms. -->
+      <param name="default-verdict" value="unknown"/>   <!-- human | machine | unknown -->
 
       <!-- Tones -->
       <param name="tones-enabled" value="true"/>
