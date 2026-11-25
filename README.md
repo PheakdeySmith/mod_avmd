@@ -328,18 +328,33 @@ production before switching.
 - **Module**: compiles warning-free (`-Wall -Wextra`) against FreeSWITCH v1.10 headers; the `.so`
   exports only `mod_amvd_module_interface`.
 - **Controller**: `go vet` clean; tested against a mock event socket (routing, VM drop on
-  message_end, transcript override, JSONL output).
+  message_end, transcript override, JSONL output) and against the real FreeSWITCH below
+  (hangups, answer signals, `agent_delay_ms`).
 
 - **Real FreeSWITCH (1.10.12), real SIP/RTP**: `test/fs_e2e/run.sh` starts an isolated
   FreeSWITCH (SIP 15060, ESL 28021, all on 127.0.0.1), loads `mod_amvd.so`, and places calls to
   `sip_callee.py`, which answers and streams each corpus file as PCMU RTP. On the 840-call held-out
   corpus with the `ai-agent` profile: 836/840 correct, 1/300 humans called machine, 3/420
   machines called human, all 60 fax and 60 SIT correct, 30 concurrent calls, no crashes.
+  That figure was measured with `default-verdict=human`. With the shipped `unknown`, the
+  `human_silent_pickup` stratum (nobody speaks for 3.6–4.5 s) reports `unknown` / `initial_silence`
+  and shows up as mismatches. That is intended, and the false-machine / false-human rates do not change.
 
   ```
   python3 test/gen_corpus.py build/heldout -n 60 --seed 202
   test/fs_e2e/run.sh build/heldout 60 ai-agent
   ```
+
+  `run.sh` then runs `signals_test.py`. It checks `AMVD-Ring-MS`, `AMVD-Early-Media` and
+  `AMVD-Gateway` for four calls:
+  - an instant answer (FAS-like)
+  - 180 + 2 s
+  - 183 early media + 1.5 s
+  - a call through the `carrier_test` gateway
+
+  With Go installed, it also runs `amvdctl` against the test FreeSWITCH. It checks the JSONL row,
+  including `agent_delay_ms` via `POST /v1/agent-audio`. The test callee's ring behaviour is set per
+  call with `sip_h_X-Ring=180:2000` or `183:1500`; without the header it answers at once.
 
 **Not verified here:** real PSTN calls and long soak tests at production volume. Synthetic accuracy is
 an upper bound: the research cited above saw 99.3 % on curated data drop to about 88 % in
