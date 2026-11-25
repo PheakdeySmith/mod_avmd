@@ -11,6 +11,15 @@
       <param name="inbound-codec-prefs" value="PCMU"/>
       <param name="outbound-codec-prefs" value="PCMU"/>
       <param name="auth-calls" value="false"/>
-    </settings></profile>
+    </settings>
+      <!-- a "carrier" route to sip_callee.py, so sip_gateway_name / AMVD-Gateway can be tested -->
+      <gateways>
+        <gateway name="carrier_test">
+          <param name="proxy" value="127.0.0.1:15090"/>
+          <param name="register" value="false"/>
+          <param name="caller-id-in-from" value="true"/>
+        </gateway>
+      </gateways>
+    </profile>
   </profiles>
 </configuration>

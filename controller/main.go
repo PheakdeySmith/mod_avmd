@@ -76,7 +76,9 @@ func dialESL(addr, pass string) (*esl, error) {
 		c.Close()
 		return nil, fmt.Errorf("auth failed: %s %v", h.Get("Reply-Text"), err)
 	}
-	e.send("event plain CUSTOM amvd::result amvd::message_end CHANNEL_HANGUP_COMPLETE")
+	// CUSTOM must come last: FreeSWITCH reads every word after it as a subclass, so a
+	// CHANNEL_HANGUP_COMPLETE placed after it is never subscribed.
+	e.send("event plain CHANNEL_HANGUP_COMPLETE CUSTOM amvd::result amvd::message_end")
 	// Filters are OR-ed: amvd events, plus hangups of channels mod_amvd marked. Without this
 	// every hangup on a 5000-CC node would cross the socket.
 	e.send("filter Event-Subclass amvd::result")

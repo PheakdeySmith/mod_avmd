@@ -4,6 +4,7 @@
 # any production instance; nothing is installed into the system FreeSWITCH.
 #
 #   test/fs_e2e/run.sh [corpus_dir] [calls_per_stratum] [profile]
+# Then signals_test.py checks ring time / early media / gateway and the amvdctl log.
 #
 # Env: FS_PREFIX (default /usr/local/freeswitch), FS_MODDIR (FreeSWITCH module dir).
 set -euo pipefail
@@ -46,3 +47,12 @@ for _ in $(seq 1 30); do sleep 2; $FS_CLI -x 'amvd status' >/dev/null 2>&1 && br
 $FS_CLI -x 'amvd status' | head -1
 
 python3 "$HERE/run_calls.py" --corpus "$CORPUS" -n "$N" --profile "$PROFILE" ${AMVD_OUT:+--out "$AMVD_OUT"}
+
+# answer signals (ring time, early media, gateway) and, with Go installed, the controller log
+echo; echo "== answer signals =="
+CTL=()
+if command -v go >/dev/null; then
+	(cd "$ROOT/controller" && go build -o "$WORK/amvdctl" .) && CTL=(--amvdctl "$WORK/amvdctl")
+fi
+WAV=$(awk -F, '$2=="human_hello"{print $1; exit}' "$CORPUS/labels.csv")
+python3 "$HERE/signals_test.py" --wav "$WAV" --profile "$PROFILE" "${CTL[@]}"

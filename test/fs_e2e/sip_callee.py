@@ -7,6 +7,10 @@ caller leg where mod_amvd listens.
 The file is chosen by the X-Wav SIP header (originate with sip_h_X-Wav=<name>.wav);
 the matching <name>.PCMU must exist in --audio-dir (make them with to_pcmu.py).
 
+Answer timing is chosen by the X-Ring header (sip_h_X-Ring=<code>:<ms>): send 180 (ringing)
+or 183 (session progress with SDP = early media) and wait <ms> before the 200 OK.
+Without it the callee answers at once with no provisional response, as a FAS carrier does.
+
 Test tool only: no auth, no retransmissions, 127.0.0.1.
 """
 import argparse
@@ -93,13 +97,30 @@ def main():
             answer = ("v=0\r\no=uas 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
                       "m=audio %d RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\na=ptime:20\r\na=sendrecv\r\n") % lport
             reply(100, "Trying", tag=False)
-            reply(200, "OK", "Contact: <sip:uas@127.0.0.1:%d>\r\nContent-Type: application/sdp\r\n" % args.port, answer)
             calls[call_id] = True
-            threading.Thread(target=stream, args=(call_id, name, rip, rport, lport), daemon=True).start()
+            ring = (header(msg, "X-Ring") or [""])[0]
+            code, _, ms = ring.partition(":")
+            sdp_hdr = "Contact: <sip:uas@127.0.0.1:%d>\r\nContent-Type: application/sdp\r\n" % args.port
+
+            def answer_call(reply=reply, call_id=call_id, name=name, rip=rip, rport=rport, lport=lport,
+                            answer=answer, code=code, ms=ms):
+                if code == "180":
+                    reply(180, "Ringing", "Contact: <sip:uas@127.0.0.1:%d>\r\n" % args.port)
+                elif code == "183":
+                    reply(183, "Session Progress", sdp_hdr, answer)
+                if ms:
+                    time.sleep(int(ms) / 1000.0)
+                if call_id not in calls:  # cancelled while ringing
+                    return
+                reply(200, "OK", sdp_hdr, answer)
+                stream(call_id, name, rip, rport, lport)
+
+            threading.Thread(target=answer_call, daemon=True).start()
         elif first.startswith("BYE"):
             calls.pop(header(msg, "Call-ID")[0], None)
             reply(200, "OK", tag=False)
         elif first.startswith("CANCEL"):
+            calls.pop(header(msg, "Call-ID")[0], None)
             reply(200, "OK", tag=False)
 
 
