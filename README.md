@@ -152,12 +152,17 @@ Precedence: profile < `${amvd_params}` < app/API arguments.
 | `amvd_features` | 16 timing/level features (CSV, order = `amvd_feature_names`) |
 | `amvd_end_type`, `amvd_end_ms`, `amvd_beep_hz` | message end: `beep` `silence` `other` |
 | `amvd_no_audio_ms` | audio that was the core's no-RTP fill |
+| `amvd_ring_ms`, `amvd_early_media` | channel created → answered, and whether early media (183) came first. A very short ring with no early media is a false-answer-supervision (FAS) suspect |
 | `AMDSTATUS`, `AMDCAUSE` | `HUMAN`/`MACHINE`/`NOTSURE`/`HANGUP` and `HUMAN`/`LONGGREETING`/`MAXWORDS`/`INITIALSILENCE`/`BEEP`/`FAX`/`SIT`/`TOOLONG`/`MODEL` (mod_amd / VICIdial compatible) |
 
 Events: `CUSTOM amvd::result`, `amvd::message_end`, `amvd::beep`, with headers `AMVD-Result`,
 `AMVD-Reason`, `AMVD-Decision-MS`, `AMVD-P-Machine`, `AMVD-Features`, `AMVD-End-Type`,
-`AMVD-End-MS`, `AMVD-Beep-Hz`, `AMVD-Profile`, `AMVD-Model`, `AMVD-No-Audio-MS`, plus the standard
-channel headers.
+`AMVD-End-MS`, `AMVD-Beep-Hz`, `AMVD-Profile`, `AMVD-Model`, `AMVD-No-Audio-MS`, and on results
+`AMVD-Ring-MS`, `AMVD-Early-Media`, `AMVD-Gateway` (`sip_gateway_name`), plus the standard channel headers.
+
+When nobody speaks, the verdict is `default-verdict`: `unknown` in the shipped profiles. Silence can be a
+quiet human, dead air or FAS, so it is not labelled `human`. `amvdctl` still routes `unknown` like
+`human`. The engine's own default (CLI, `make test`) is still `human`.
 
 Hooks for background mode, with no controller needed. They run on a pool thread, never under the
 bug lock, so they may transfer, record, or start other media bugs:
@@ -187,6 +192,13 @@ curl -X POST http://127.0.0.1:8099/v1/transcript-verdict \
   -d '{"uuid":"<freeswitch-uuid>","category":"machine-vm","transcript":"you have reached...","at_ms":2600}'
 ```
 
+When the agent plays its first audio on the call, have the worker report it, so the log shows how
+much dead air the callee heard after the verdict (`agent_delay_ms`):
+
+```bash
+curl -X POST http://127.0.0.1:8099/v1/agent-audio -d '{"uuid":"<freeswitch-uuid>"}'
+```
+
 Call screeners (iOS "Ask Reason for Calling", Pixel Call Screen) look like machines on timing
 alone. Only the transcript separates them, which is why that path exists.
 
@@ -200,7 +212,8 @@ alone. Only the transcript separates them, which is why that path exists.
 | Quiet / noisy lines | `vad-margin-db` 7–12, `vad-floor-dbfs` −50…−40 |
 | VM drop starts mid-greeting on no-beep mailboxes | raise `end-silence-ms` (2000–2500) |
 | Music-on-greeting fires beeps | raise `tone-purity` to 0.85, lower `beep-max-ms` |
-| `unknown` too frequent | check `amvd_no_audio_ms` (RTP problem), raise `initial-silence-ms` |
+| `unknown` too frequent | check `amvd_no_audio_ms` (RTP problem), group by `gateway` / `ring_ms` in the `amvdctl` log (FAS routes), raise `initial-silence-ms` |
+| Callees say "hello? hello?" after a `human` verdict | check `agent_delay_ms` in the `amvdctl` log (agent too slow to speak) and outbound RTP (one-way audio) |
 
 Change one variable at a time and compare on the **same** corpus. Only call a change better when
 the Wilson intervals don't overlap.

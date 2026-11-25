@@ -124,10 +124,12 @@ def main():
         print("  %-20s %3d/%3d  P50=%4d P95=%4d" % (st, sum(ok for ok, _ in v), len(v),
                                                     ms[len(ms) // 2], ms[max(0, int(len(ms) * .95) - 1)]))
     if args.out:
-        cols = ["AMVD-Result", "AMVD-Reason", "AMVD-Decision-MS", "AMVD-First-Speech-MS", "AMVD-P-Machine"]
+        cols = ["AMVD-Result", "AMVD-Reason", "AMVD-Decision-MS", "AMVD-First-Speech-MS", "AMVD-P-Machine",
+                "AMVD-Ring-MS", "AMVD-Early-Media", "AMVD-No-Audio-MS", "AMVD-Gateway"]
         with open(args.out, "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["file", "truth", "result", "reason", "decision_ms", "first_speech_ms", "p_machine"])
+            w.writerow(["file", "truth", "result", "reason", "decision_ms", "first_speech_ms", "p_machine",
+                        "ring_ms", "early_media", "no_audio_ms", "gateway"])
             for fn, (r, ev) in sorted(out.items()):
                 w.writerow([fn, r.get("truth", "")] + [ev.get(c, "") for c in cols])
         print("\nwrote", args.out)
